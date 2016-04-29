@@ -1,0 +1,700 @@
+---
+title: "Microbiol_612_Assignment_2"
+author: "Wenyu Gu (gwenyu)"
+date: "April 26, 2016"
+output: html_document
+---
+
+To analysis and reclassify the MiSeq SOP dataset using Greengenes, I downloaded Greengenes-formatted database from <http://www.mothur.org/wiki/Greengenes-formatted_databases>, "greengenes reference taxonomy". To avoid confusion with previous code referencing RDP, a new folder (MothurGG) is created with necessary files decompressed and deposited. I run Mothur again from the beginning in this new directory. The early part of code and results are the same as the wiki example, but are still included as below. Downstream analysis is mostly focused on OTU-based analysis. The results from classifying by Greengenes and RDP are compared.  
+
+#### Reducing sequencing and PCR errors
+Start by combining two sets of reads to make contigs, 
+```{r eval=FALSE}
+mothur > make.contigs(file=stability.files, processors=8)
+
+mothur > summary.seqs(fasta=current)
+
+  	Start	End	NBases	Ambigs	Polymer	NumSeqs
+Minimum:	1	248	248	0	3	1
+2.5%-tile:	1	252	252	0	3	3810
+25%-tile:	1	252	252	0	4	38091
+Median: 	1	252	252	0	4	76181
+75%-tile:	1	253	253	0	5	114271
+97.5%-tile:	1	253	253	6	6	148552
+Maximum:	1	502	502	249	243	152360
+Mean:	1	252.811	252.811	0.70063	4.44854
+# of Seqs:	152360
+
+```
+
+Get rid of badly aligned contigs:
+```{r eval=FALSE}
+mothur > screen.seqs(fasta=stability.trim.contigs.fasta, group=stability.contigs.groups, maxambig=0, maxlength=275)
+```
+
+#### Processing improved sequences
+Get rid of duplicate sequences and create a count table:
+```{r eval=FALSE}
+mothur > unique.seqs(fasta=stability.trim.contigs.good.fasta)
+mothur > count.seqs(name=stability.trim.contigs.good.names, group=stability.contigs.good.groups)
+mothur > summary.seqs(count=stability.trim.contigs.good.count_table)
+
+      Start	End	NBases	Ambigs	Polymer	NumSeqs
+Minimum:	1	250	250	0	3	1
+2.5%-tile:	1	252	252	0	3	3222
+25%-tile:	1	252	252	0	4	32219
+Median: 	1	252	252	0	4	64437
+75%-tile:	1	253	253	0	5	96655
+97.5%-tile:	1	253	253	0	6	125651
+Maximum:	1	270	270	0	12	128872
+Mean:	1	252.462	252.462	0	4.36693
+# of unique seqs:	16426
+total # of seqs:	128872
+```
+
+I can see the maximum sequence length is reduced to 270 bp. And the sequence number is largely reduced. 
+
+To align the sequences, I still used the Silva provided with wiki example. To make a customized reference alignment:
+```{r eval=FALSE}
+mothur > pcr.seqs(fasta=silva.bacteria.fasta, start=11894, end=25319, keepdots=F, processors=8)
+mothur > system(mv silva.bacteria.pcr.fasta silva.v4.fasta)
+mothur > summary.seqs(fasta=silva.v4.fasta)
+
+  	Start	End	NBases	Ambigs	Polymer	NumSeqs
+Minimum:	1	13424	270	0	3	1
+2.5%-tile:	1	13425	292	0	4	374
+25%-tile:	1	13425	293	0	4	3740
+Median: 	1	13425	293	0	4	7479
+75%-tile:	1	13425	293	0	5	11218
+97.5%-tile:	1	13425	294	1	6	14583
+Maximum:	3	13425	351	5	9	14956
+Mean:	1.00074	13425	292.977	0.0573014	4.57014
+# of Seqs:	14956
+```
+
+Now to align the sequences with align.seqs:
+```{r eval=FALSE}
+mothur > align.seqs(fasta=stability.trim.contigs.good.unique.fasta, reference=silva.v4.fasta)
+
+mothur > summary.seqs(fasta=stability.trim.contigs.good.unique.align, count=stability.trim.contigs.good.count_table)
+
+  	Start	End	NBases	Ambigs	Polymer	NumSeqs
+Minimum:	1250	10693	250	0	3	1
+2.5%-tile:	1968	11550	252	0	3	3222
+25%-tile:	1968	11550	252	0	4	32219
+Median: 	1968	11550	252	0	4	64437
+75%-tile:	1968	11550	253	0	5	96655
+97.5%-tile:	1968	11550	253	0	6	125651
+Maximum:	1982	13400	270	0	12	128872
+Mean:	1967.99	11550	252.462	0	4.36693
+# of unique seqs:	16426
+total # of seqs:	128872
+```
+
+To make sure that everything overlaps the same region, remove unnecessary columns, and remove redundant sequences:
+```{r eval=FALSE}
+mothur > screen.seqs(fasta=stability.trim.contigs.good.unique.align, count=stability.trim.contigs.good.count_table, summary=stability.trim.contigs.good.unique.summary, start=1968, end=11550, maxhomop=8)
+mothur > summary.seqs(fasta=current, count=current)
+
+  	Start	End	NBases	Ambigs	Polymer	NumSeqs
+Minimum:	1965	11550	250	0	3	1
+2.5%-tile:	1968	11550	252	0	3	3217
+25%-tile:	1968	11550	252	0	4	32164
+Median: 	1968	11550	252	0	4	64328
+75%-tile:	1968	11550	253	0	5	96492
+97.5%-tile:	1968	11550	253	0	6	125439
+Maximum:	1968	13400	270	0	8	128655
+Mean:	1968	11550	252.463	0	4.36666
+# of unique seqs:	16298
+total # of seqs:	128655
+
+mothur > filter.seqs(fasta=stability.trim.contigs.good.unique.good.align, vertical=T, trump=.)
+
+mothur > unique.seqs(fasta=stability.trim.contigs.good.unique.good.filter.fasta, count=stability.trim.contigs.good.good.count_table)
+```
+
+To further remove errors, Mothur merges sequences based on the standard of allowing 1 difference for every 100 bp of sequence:
+```{r eval=FALSE}
+mothur > pre.cluster(fasta=stability.trim.contigs.good.unique.good.filter.unique.fasta, count=stability.trim.contigs.good.unique.good.filter.count_table, diffs=2)
+```
+
+To remove chimeras:
+```{r eval=FALSE}
+mothur > chimera.uchime(fasta=stability.trim.contigs.good.unique.good.filter.unique.precluster.fasta, count=stability.trim.contigs.good.unique.good.filter.unique.precluster.count_table, dereplicate=t)
+
+mothur > remove.seqs(fasta=stability.trim.contigs.good.unique.good.filter.unique.precluster.fasta, accnos=stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.accnos)
+
+mothur > summary.seqs(fasta=current, count=current)
+
+  	Start	End	NBases	Ambigs	Polymer	NumSeqs
+Minimum:	1	376	249	0	3	1
+2.5%-tile:	1	376	252	0	3	2983
+25%-tile:	1	376	252	0	4	29829
+Median: 	1	376	252	0	4	59657
+75%-tile:	1	376	253	0	5	89485
+97.5%-tile:	1	376	253	0	6	116331
+Maximum:	1	376	256	0	8	119313
+Mean:	1	376	252.467	0	4.37276
+# of unique seqs:	2616
+total # of seqs:	119313
+```
+
+I can see that about 10,000 sequences has been removed from the ~ 130,000 sequences. 
+
+As a final quality control step, we need to remove sequences aligned to archaea, chloroplasts, or mitochondira. Here is where the code needs a little change.
+
+In this classify.seqs command, I changed the "reference=trainset9_032012.pds.fasta, taxonomy=trainset9_032012.pds.tax" to the downloaded "reference=gg_13_8_99.fasta, taxonomy=gg_13_8_99.gg.tax" files from Greengenes.
+
+```{r eval=FALSE}
+mothur > classify.seqs(fasta=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.fasta, count=stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.count_table, reference=gg_13_8_99.fasta, taxonomy=gg_13_8_99.gg.tax, cutoff=80)
+
+Output File Names: 
+stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.gg.wang.taxonomy
+stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.gg.wang.tax.summary
+```
+The output file's name has "gg" instead of "pds" from the wiki example. The name changes based on the reference tax file, which makes it easier to track in the following codes. 
+
+Also, by browsing the "gg_13_8_99.gg.tax" file I noticed that it has "mitochondria" instead of "Mitochondria" in RDP, and a little experimenting suggests that it matters. So it's changed in the code:
+```{r eval=FALSE}
+mothur > remove.lineage(fasta=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.fasta, count=stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.count_table, taxonomy=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.gg.wang.taxonomy, taxon=Chloroplast-mitochondria-unknown-Archaea-Eukaryota)
+
+Output File Names: 
+stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.gg.wang.pick.taxonomy
+stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.fasta
+stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.pick.count_table
+```
+
+To compare the results from using the two reference database, I read the taxonomy file into R and compare how many taxonomy groups have been aligned and how many have left after "remove.lineage".
+
+Use Greengenes before remove.lineage:
+```{r echo=FALSE}
+ggsBeforePick <-read.table(file="/Users/WGreene/Desktop/MothurGG/stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.gg.wang.taxonomy", header=F)
+nrow(ggsBeforePick)
+```
+Use Greengenes after remove.lineage:
+```{r echo=FALSE}
+ggs <- read.table(file="/Users/WGreene/Desktop/MothurGG/stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.gg.wang.pick.taxonomy", header=F)
+nrow(ggs)
+```
+Use RDP before remove.lineage:
+```{r echo=FALSE}
+RDPBeforePick <- read.table(file="/Users/WGreene/Desktop/MothurTraining/stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pds.wang.taxonomy", header=F)
+nrow(RDPBeforePick)
+```
+Use RDP after remove.lineage:
+```{r echo=FALSE}
+RDP <- read.table(file="/Users/WGreene/Desktop/MothurTraining/stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pds.wang.pick.taxonomy", header=F)
+nrow(RDP)
+```
+
+The numbers are the same. They both removed 20 sequence that are aligned to unwanted stuff, which indicates a good agreement between different database. But just to check this is not a "false positive", I'd like to get a peek of the taxonomy files to show that they are indeed classified using different reference:
+
+Use Greengenes:
+```{r echo=FALSE}
+head(ggs)
+```
+Use RDP:
+```{r echo=FALSE}
+head(RDP)
+```
+Yes, there are difference in taxonomy names... So it's safe to move to the next session. 
+
+#### Assessing error rates
+```{r eval=FALSE}
+mothur > get.groups(count=stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.pick.count_table, fasta=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.fasta, groups=Mock)
+mothur > seq.error(fasta=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.fasta, count=stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.pick.pick.count_table, reference=HMP_MOCK.v35.fasta, aligned=F)
+
+Overall error rate:  6.5108e-05
+Errors	Sequences
+0	3998
+1	3
+2	0
+3	2
+4	1
+5	0
+6	0
+7	0
+8	0
+9	0
+10	0
+11	2
+12	0
+13	0
+14	0
+15	0
+16	0
+17	0
+18	0
+19	0
+20	0
+21	0
+22	0
+23	0
+24	0
+25	0
+26	0
+27	0
+28	0
+29	0
+30	0
+31	1
+```
+
+Error rate is 0.0065%, which is great. 
+
+To cluster the sequences into OTUs:
+```{r eval=FALSE}
+mothur > dist.seqs(fasta=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.fasta, cutoff=0.20)
+mothur > cluster(column=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.dist, count=stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.pick.pick.count_table)
+mothur > make.shared(list=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.an.unique_list.list, count=stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.pick.pick.count_table, label=0.03)
+mothur > rarefaction.single(shared=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.an.unique_list.shared)
+```
+There are 35 OTUs from the Mock community, which is also good. 
+
+#### Preparing for OTUs-based analysis
+First remove mock community:
+```{r eval=FALSE}
+mothur > remove.groups(count=stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.pick.count_table, fasta=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.fasta, taxonomy=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.gg.wang.pick.taxonomy, groups=Mock)
+```
+
+To cluster sequences into OTUs, I chose to treat the sequences as a large dataset and use cluster.split command. Since this method use the taxonomic information to split the sequences into bins and then cluster within each bin, it depends on the classification reference database. So the analysis results from now on are expected to have some difference compared to that using the RDP reference.
+
+Now, to cluster sequences; get a summary table; and classify the OTUs:
+
+```{r eval=FALSE}
+mothur > cluster.split(fasta=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.fasta, count=stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.pick.pick.count_table, taxonomy=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.gg.wang.pick.pick.taxonomy, splitmethod=classify, taxlevel=4, cutoff=0.15)
+
+mothur > make.shared(list=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.an.unique_list.list, count=stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.pick.pick.count_table, label=0.03)
+
+mothur > classify.otu(list=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.an.unique_list.list, count=stability.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.pick.pick.count_table, taxonomy=stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.gg.wang.pick.pick.taxonomy, label=0.03)
+```
+
+Open stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.an.unique_list.0.03.cons.taxonomy to get a peek:
+```{r echo=FALSE}
+OTUsClassifyGG <- read.table(file="/Users/WGreene/Desktop/MothurGG/stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.an.unique_list.0.03.cons.taxonomy", header=T,sep="")
+OTUsClassifyGG[1:8,]
+``` 
+And there's total of 
+```{r echo=FALSE}
+nrow(OTUsClassifyGG)
+```
+OTUs clustered. 
+
+To compare these with clustering using RDP:
+```{r echo=FALSE}
+OTUsClassifyRDP <- read.table(file="/Users/WGreene/Desktop/MothurTraining/stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.an.unique_list.0.03.cons.taxonomy", header=T,sep="")
+OTUsClassifyRDP[1:8,]
+``` 
+And there's total of 
+```{r echo=FALSE}
+nrow(OTUsClassifyRDP)
+```
+OTUs clustered. 12 more than Greengenes, but close enough. We'll see if it affects later analysis. 
+
+It's also clear that these top OTUs are the same clusters, e.g., OTU0001 from Greengenes == OTU0001 from RDP as they share the exactly same or very close sizes. However, the names do have difference. As the biggest OTU from Greengenes is assigned "S24-7_unclassified" below Bacteroidales, while it's assigned "Porphyromonadaceae" from RDP; and OTU0008 is assigned "Rikenellaceae" family by Greengenes and "Alistipes" by RDP. So it's impotant to note that if certain analysis requires high accuracy in toxonomy group, it's better to run it using different database, and take out the seuquences for BLAST etc to decide which fits better. 
+
+#### OTU-based anlysis
+Some preparation:
+```{r eval=FALSE}
+mothur > system(mv stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.an.unique_list.shared stability.an.shared)
+
+mothur > system(mv stability.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.pick.an.unique_list.0.03.cons.taxonomy stability.an.cons.taxonomy)
+
+mothur > count.groups(shared=stability.an.shared)
+F3D0 contains 6223.
+F3D1 contains 4694.
+F3D141 contains 4693.
+F3D142 contains 2452.
+F3D143 contains 2439.
+F3D144 contains 3496.
+F3D145 contains 5582.
+F3D146 contains 3873.
+F3D147 contains 12618.
+F3D148 contains 9590.
+F3D149 contains 10103.
+F3D150 contains 4171.
+F3D2 contains 15774.
+F3D3 contains 5314.
+F3D5 contains 3484.
+F3D6 contains 6439.
+F3D7 contains 4083.
+F3D8 contains 4287.
+F3D9 contains 5775.
+
+Total seqs: 115090.
+```
+
+I see that the smallest sample had 2439 sequences in it. Anyway, I subsampled 2241 sequences to be consistent with the wiki example. 
+```{r eval=FALSE}
+mothur > sub.sample(shared=stability.an.shared, size=2241)
+```
+
+#####Alpha diversity
+To generate rarefaction curves:
+```{r eval=FALSE}
+mothur > rarefaction.single(shared=stability.an.shared, calc=sobs, freq=100)
+```
+And plot it in R: (used reshape package to manipulate the table, and plot by ggplot)
+```{r echo=FALSE}
+library(plyr)
+library("ggplot2")
+library(reshape2)
+RarefactionCurveGG <- read.table(file="/Users/WGreene/Desktop/MothurGG/stability.an.groups.rarefaction", header=T,sep="")
+dGG <- melt(RarefactionCurveGG, id.vars="numsampled")
+ggplot(data=dGG, aes(numsampled, value, col=variable)) +xlim(c(0,2200)) +ylim(c(0,150)) +geom_line()+theme(legend.position="none")
+```
+
+For the data based on RDP, do the same:
+```{r echo=FALSE}
+RarefactionCurveRDP <- read.table(file="/Users/WGreene/Desktop/MothurTraining/stability.an.groups.rarefaction", header=T,sep="")
+dRDP <- melt(RarefactionCurveRDP, id.vars="numsampled")
+ggplot(data=dRDP, aes(numsampled, value, col=variable)) +xlim(c(0,2200)) +ylim(c(0,150)) +geom_line()+theme(legend.position="none")
+```
+
+They look fairly close and both indicate a good sampling effort. 
+
+To perform random sampling and calculate the average:
+```{r eval=FALSE}
+mothur > summary.single(shared=stability.an.shared, calc=nseqs-coverage-sobs-invsimpson, subsample=2441)
+```
+
+This allows us to look at the calculated coverage in the output file "stability.an.groups.ave-std.summary", I read the table into R and get a 5-number statistics on coverage (used ddply to group data):
+```{r echo=FALSE}
+CoverageGG <- read.table(file="/Users/WGreene/Desktop/MothurGG/stability.an.groups.ave-std.summary", header=T,sep="")
+ddply(CoverageGG, "method", .fun = function(x) summary(x$coverage))
+```
+
+Also do the same on the RDP-based analysis:
+```{r echo=FALSE}
+CoverageRDP <- read.table(file="/Users/WGreene/Desktop/MothurTraining/stability.an.groups.ave-std.summary", header=T,sep="")
+ddply(CoverageRDP, "method", .fun = function(x) summary(x$coverage))
+```
+They are both great, with ~98% coverage, indicating again, the sampling is good. 
+
+#####Beta diversity
+Create some heatmaps:
+```{r eval=FALSE}
+mothur > heatmap.bin(shared=stability.an.0.03.subsample.shared, scale=log2, numotu=50) 
+```
+![Using Greengenes](/Users/WGreene/Desktop/MothurGG/stability.an.0.03.subsample.0.03.heatmap.bin.svg)
+
+![Using RDP](/Users/WGreene/Desktop/MothurTraining/stability.an.0.03.subsample.0.03.heatmap.bin.svg)
+
+```{r eval=FALSE}
+mothur > dist.shared(shared=stability.an.shared, calc=thetayc-jclass, subsample=2241)
+mothur > heatmap.sim(phylip=stability.an.thetayc.0.03.lt.ave.dist)
+mothur > heatmap.sim(phylip=stability.an.jclass.0.03.lt.ave.dist)
+```
+
+Using Greengenes, Jaccard Coeff.:
+![Using Greengenes, Jaccard Coeff.](/Users/WGreene/Desktop/MothurGG/stability.an.jclass.0.03.lt.ave.heatmap.sim.svg)
+
+Using RDP, Jaccard Coeff.:
+![Using RDP, Jaccard Coeff.](/Users/WGreene/Desktop/MothurTraining/stability.an.jclass.0.03.lt.ave.heatmap.sim.svg)
+
+Using Greengenes, thetayc Coeff.:
+![Using Greengenes, thetayc Coeff.](/Users/WGreene/Desktop/MothurGG/stability.an.thetayc.0.03.lt.ave.heatmap.sim.svg)
+
+Using RDP, thetayc Coeff.:
+![Using RDP, thetayc Coeff.](/Users/WGreene/Desktop/MothurTraining/stability.an.thetayc.0.03.lt.ave.heatmap.sim.svg)
+
+As expected, there's a good agreement between using the two references. 
+
+Early days are more similar (D1-D9) between each other, while different from later days (D141-149). The same is for the later days.
+
+There are some difference in using Jaccard or thetayc methods. The latter indicates a better similarity of Day 0 with the later days(D141-150), while Jaccard method indicates Day 0 has low similarity with either early days or later days. We can look into this point with other analyzing method as shown below. 
+
+Mothur can also generate Venn diagram:
+```{r eval=FALSE}
+mothur > venn(shared=stability.an.0.03.subsample.shared, groups=F3D0-F3D1-F3D2-F3D3)
+```
+
+Using Greengenes, day 0,1,2,3:
+![Using Greengenes, thetayc Coeff.](/Users/WGreene/Desktop/MothurGG/stability.an.0.03.subsample.0.03.sharedsobs.F3D0-F3D1-F3D2-F3D3.svg)
+
+Using RDP, day 0,1,2,3:
+![Using RDP, thetayc Coeff.](/Users/WGreene/Desktop/MothurTraining/stability.an.0.03.subsample.0.03.sharedsobs.F3D0-F3D1-F3D2-F3D3.svg)
+
+Using the two reference databases generally agrees with each other. 
+
+If to create a Venn diagram between selected early days and later days:
+```{r eval=FALSE}
+mothur > venn(shared=stability.an.0.03.subsample.shared, groups=F3D1-F3D2-F3D149-F3D150)
+```
+
+Using Greengenes, day 1,2,149,150:
+![Using Greengenes, thetayc Coeff.](/Users/WGreene/Desktop/MothurGG/stability.an.0.03.subsample.0.03.sharedsobs.F3D1-F3D149-F3D150-F3D2.svg)
+
+No distinct difference is observed from Venn diagram when comparing early days to early days or comparing early days to later days. That is, based on the limited two combinations above, there are ~70 shared species between any 4 days, 70-80 shared species between any 3 days, and ~80-100 shared species between any 2 days. Venn diagram tells the difference in species, but do not take the relative abundance into account. It's a limited tool in this case. 
+
+To look more at the similarity of the samples to each other, Mothur can generate dendrogram:
+```{r eval=FALSE}
+mothur > tree.shared(phylip=stability.an.thetayc.0.03.lt.ave.dist)
+```
+The tre files are visualized in FigTree and exported:
+
+Using Greengenes, dendrogram: 
+![Using Greengenes, thetayc Coeff.](/Users/WGreene/Desktop/MothurGG/stability.an.thetayc.0.03.lt.ave.jpg)
+
+Using RDP, dendrogram:
+![Using RDP, thetayc Coeff.](/Users/WGreene/Desktop/MothurTraining/stability.an.thetayc.0.03.lt.ave.jpg)
+
+Using the two reference database give the same clustering, which is great. Both show that the early and late days' communities cluster with themselves to the exclusion of the others. 
+
+To test the significance of the clustering: 
+```{r eval=FALSE}
+mothur > parsimony(tree=stability.an.thetayc.0.03.lt.ave.tre, group=mouse.time.design,  groups=all)
+
+Tree#  Groups	ParsScore	ParsSig
+1	Early-Late	1	<0.0010
+```
+Yes, it is significant!
+
+To visualize data using ordination method:
+```{r eval=FALSE}
+mothur > pcoa(phylip=stability.an.thetayc.0.03.lt.ave.dist)
+
+Rsq 1 axis: 0.736229
+Rsq 2 axis: 0.881984
+Rsq 3 axis: 0.977788
+
+(If classified by RDP:
+Rsq 1 axis: 0.739162
+Rsq 2 axis: 0.884436
+Rsq 3 axis: 0.977476)
+```
+The stability.an.thetayc.0.03.lt.ave.pcoa.loadings file shows that the first and second axis represent about 45 and 13.5% of the variation (58.5% of the total) for the thetaYC distances (same for both Greengenes and RDP references). 
+
+The output indicates that the R^2 between the original distance matrix and the distance between the points in 2D PCoA space was 0.88, but that if to add a third dimension the R-squared value increases to 0.98. Again, using the two references give good agreement. 
+
+I will plot out both 2D and 3D images. **I choose red for Day 0, blue for the other early days, and green for later days.**
+
+2D PcoA by Greengenes:
+```{r echo=FALSE}
+nmds.col<-c("red","green", rep("blue",10), rep("green",7))
+pcoaGG <- read.table(file="/Users/WGreene/Desktop/MothurGG/stability.an.thetayc.0.03.lt.ave.pcoa.axes", header=T)
+plot(pcoaGG$axis1, pcoaGG$axis2, col=nmds.col)
+```
+
+2D PcoA by RDP:
+```{r echo=FALSE}
+pcoaRDP <- read.table(file="/Users/WGreene/Desktop/MothurTraining/stability.an.thetayc.0.03.lt.ave.pcoa.axes", header=T)
+plot(pcoaRDP$axis1, pcoaRDP$axis2, col=nmds.col)
+```
+
+For 3D plots, I plotted using "rgl" package. Since the 3D interactive plot can not be embedded in the rmarkdown (or I don't know how...), the R code for plotting are presented below without running. Snap shots of the 3D images are saved as jpeg and embedded separately. 
+
+```{r eval=FALSE}
+install.packages("rgl")
+library(rgl)
+pcoaGG <- read.table(file="/Users/WGreene/Desktop/MothurGG/stability.an.thetayc.0.03.lt.ave.pcoa.axes", header=T)
+open3d()
+plot3d(x=pcoaGG$axis1, y=pcoaGG$axis2, z=pcoaGG$axis3, col=nmds.col, type="s")
+rgl.snapshot ("/Users/WGreene/Desktop/MothurGG/pcoaGG3D.jpg")
+
+pcoaRDP <- read.table(file="/Users/WGreene/Desktop/MothurTraining/stability.an.thetayc.0.03.lt.ave.pcoa.axes", header=T)
+plot3d(x=pcoaRDP$axis1, y=pcoaRDP$axis2, z=pcoaRDP$axis3, col=nmds.col, type="s")
+rgl.snapshot ("/Users/WGreene/Desktop/MothurTraining/pcoaRDP3D.jpg")
+```
+Using Greengenes, pcoa3D: 
+![](/Users/WGreene/Desktop/MothurGG/pcoaGG3D.jpg)
+
+Using RDP, pcoa3D:
+![](/Users/WGreene/Desktop/MothurTraining/pcoaRDP3D.jpg)
+
+By using PCoA method, 2D plotting is good enough for making the point- Day 0 clusters better with later days, while separated with other early days. There is more scatter in early days compared to later days. 3D plots also look very good. 
+
+And the results from referencing Greengenes and RDP are consistant. 
+
+Now let's try nmds method:
+```{r eval=FALSE}
+mothur > nmds(phylip=stability.an.thetayc.0.03.lt.ave.dist)
+Number of dimensions:  2
+Lowest stress :	0.113836
+R-squared for configuration:	0.947489
+
+(If classified by RDP:
+Lowest stress :  0.113
+R-squared for configuration:	0.94822)
+
+mothur > nmds(phylip=stability.an.thetayc.0.03.lt.ave.dist, mindim=3, maxdim=3)
+Number of dimensions:  3
+Lowest stress :  0.0467355
+R-squared for configuration:  0.989423
+
+(if classified by RDP:
+Lowest stress :  0.0470508
+R-squared for configuration:	0.989319)
+```
+
+Based on the output, it seems that 2D is acceptable. Anyway, let's plotted both out:
+
+2D mnds by Greengenes: 
+```{r echo=FALSE}
+nmdsGG <- read.table(file="/Users/WGreene/Desktop/MothurGG/stability.an.thetayc.0.03.lt.ave.nmds.axes", header=T)
+plot(nmdsGG$axis1, nmdsGG$axis2, col=nmds.col)
+```
+
+2D nmds by RDP: 
+```{r echo=FALSE}
+nmdsRDP <- read.table(file="/Users/WGreene/Desktop/MothurTraining/stability.an.thetayc.0.03.lt.ave.nmds.axes", header=T)
+plot(nmdsRDP$axis1, nmdsRDP$axis2, col=nmds.col)
+```
+
+R code for generating 3D nmds:
+```{r eval=FALSE}
+nmdsGG <- read.table(file="/Users/WGreene/Desktop/MothurGG/stability.an.thetayc.0.03.lt.ave.nmds.axes", header=T)
+open3d()
+plot3d(x=nmdsGG$axis1, y=nmdsGG$axis2, z=nmdsGG$axis3, col=nmds.col, type="s")
+rgl.snapshot ("/Users/WGreene/Desktop/MothurGG/nmdsGG3D.jpg")
+
+nmdsRDP <- read.table(file="/Users/WGreene/Desktop/MothurTraining/stability.an.thetayc.0.03.lt.ave.nmds.axes", header=T)
+plot3d(x=nmdsRDP$axis1, y=nmdsRDP$axis2, z=nmdsRDP$axis3, col=nmds.col, type="s")
+rgl.snapshot ("/Users/WGreene/Desktop/MothurTraining/nmdsRDP3D.jpg")
+```
+
+Using Greengenes, nmds3D: 
+![](/Users/WGreene/Desktop/MothurGG/nmdsGG3D.jpg)
+
+Using RDP, nmds3D:
+![](/Users/WGreene/Desktop/MothurTraining/nmdsRDP3D.jpg)
+
+The 2D images don't look as good as 3D, the points from early days scatter too much and do not separate well with the later days, which dosen't help our story here. It's more clear from the 3D images. 
+
+To test the significance of spatial separation between early/later points:
+```{r eval=FALSE}
+mothur > amova(phylip=stability.an.thetayc.0.03.lt.ave.dist, design=mouse.time.design)
+
+Early-Late  Among	Within	Total
+SS	0.630114	0.555087	1.1852
+df	1	17	18
+MS	0.630114	0.0326522
+
+Fs:	19.2978
+p-value: <0.001*
+
+(if classified by RDP:
+Early-Late  Among	Within	Total
+SS	0.628556	0.549215	1.17777
+df	1	17	18
+MS	0.628556	0.0323068
+
+Fs:	19.4559
+p-value: <0.001*)
+```
+Yes, the early/late clouds are significantly separated!
+
+```{r eval=FALSE}
+mothur > homova(phylip=stability.an.thetayc.0.03.lt.ave.dist, design=mouse.time.design)
+HOMOVA  BValue	P-value	SSwithin/(Ni-1)_values
+Early-Late	7.46656	<0.001*	0.0605775	0.00782969
+
+(if classified by RDP:
+HOMOVA  BValue	P-value	SSwithin/(Ni-1)_values
+Early-Late	7.41613	<0.001*	0.059877	0.00779987)
+```
+And the early samples are less stable than the late samples. 
+
+
+At last, in order to find the species/OTUs that are responsible for the shift, following the example, we first determine the correlation of the relative abundance of each OTU with the two axes in the NMDS dataset: 
+```{r eval=FALSE}
+mothur > corr.axes(axes=stability.an.thetayc.0.03.lt.ave.nmds.axes, shared=stability.an.0.03.subsample.shared, method=spearman, numaxes=3)
+```
+
+The results show which OTU are responsible for moving points in certain direction along the axis. To anwser more specific question, such as what is the effect of weaning, the folloing codes are run:
+
+```{r eval=FALSE}
+mothur > corr.axes(axes=stability.an.thetayc.0.03.lt.ave.nmds.axes, metadata=mouse.dpw.metadata, method=spearman, numaxes=3)
+Feature  axis1	p-value	axis2	p-value	axis3	p-value	length
+dpw	0.657895	0.002200	0.422807	0.071305	-0.771930	0.000108	1.098848
+
+(if classified by RDP:)
+Feature  axis1	p-value	axis2	p-value	axis3	p-value	length
+dpw	-0.191228	0.417187	0.838596	0.000007	-0.535088	0.018239	1.012981)
+```
+Indicating that as the dpw increases the communities shift to in the negative direction along axis 3.
+
+```{r eval=FALSE}
+mothur > get.communitytype(shared=stability.an.0.03.subsample.shared)
+
+K  NLE		logDet	BIC		AIC		Laplace
+1	9586.59	527.49	10034.14	9890.59	9570.97
+2	9628.31	501.68	10524.90	10237.31	9319.52
+3	10241.74	305.79	11587.35	11155.74	9554.72
+4	10932.64	184.71	12727.28	12151.64	9904.81
+5	11659.03	-97.41	13902.70	13183.03	10209.87
+
+RDP:
+K  NLE		logDet	BIC		AIC		Laplace
+1	9743.25	530.44	10212.88	10062.25	9715.32
+2	9817.70	476.34	10758.45	10456.70	9468.67
+3	10529.16	244.89	11941.02	11488.16	9770.35
+4	11196.48	92.06	13079.45	12475.48	10067.19
+5	11931.88	-192.77	14285.96	13530.88	10366.11)
+```
+We see that the minimum Laplace value is for a K value of 2 (9348.28). This indicates that our samples belonged to two community types.
+
+Opening stability.an.0.03.subsample.0.03.dmm.mix.design we see that all of the late samples and the Day 0, Day 1 sample belonged to Partition_1 and the other early samples belonged to Partition_2. Which is different from previous results...
+
+```{r eval=F}
+F3D0  Partition_1
+F3D1	Partition_2
+F3D141	Partition_1
+F3D142	Partition_1
+F3D143	Partition_1
+F3D144	Partition_1
+F3D145	Partition_1
+F3D146	Partition_1
+F3D147	Partition_1
+F3D148	Partition_1
+F3D149	Partition_1
+F3D150	Partition_1
+F3D2	Partition_2
+F3D3	Partition_2
+F3D5	Partition_2
+F3D6	Partition_2
+F3D7	Partition_2
+F3D8	Partition_2
+F3D9	Partition_2
+```
+
+By looking at the stability.an.0.03.subsample.0.03.dmm.mix.summary file,
+```{r eval=FALSE}
+OTU  P0.mean	P1.mean	P1.lci	P1.uci	P2.mean	P2.lci	P2.uci	Difference	CumFraction
+Otu0004	3.38	10.69	9.36	12.21	0.43	0.25	0.73	10.26	0.15
+Otu0005	6.27	8.69	7.56	9.98	3.76	3.00	4.71	4.92	0.23
+Otu0006	5.73	7.17	6.20	8.29	3.97	3.19	4.95	3.20	0.28
+Otu0008	4.00	2.95	2.43	3.57	5.74	4.73	6.97	2.80	0.32
+Otu0010	2.08	3.44	2.87	4.14	0.96	0.65	1.41	2.49	0.36
+Otu0013	1.36	0.73	0.53	1.03	2.67	2.08	3.44	1.94	0.38
+Otu0007	5.66	4.87	4.15	5.72	6.71	5.55	8.10	1.84	0.41
+Otu0001	9.42	8.63	7.52	9.92	10.27	8.69	12.12	1.63	0.44
+```
+OTU 004 is most responsible for separating the comminites. It is Porphyromonadaceae classified by RDP, while annoted as Bacteria-Bacteroidetes-Bacteroidia-Bacteroidales-S24-7-unclassified... in Greengenes. As stated before, they are the same cluster. Overall the two reference are consistant. 
+
+#####Population-level analysis
+Try the metastats command for analyzing changes of OTUs:
+```{r eval=FALSE}
+mothur > metastats(shared=stability.an.0.03.subsample.shared, design=mouse.time.design)
+```
+
+I open the "stability.an.0.03.subsample.0.03.Late-Early.metastats" file in excel, sort it by p-values, and map to the taxonomy files. The top five from both references are the same clusters based on the cluster size. 
+
+However, with Greengenes they are classified as Bacteroidales-S24-7-unclassified, Lactobacillaceae, and Turicibacteraceae. While the top five from RDP are classified as Bacteroidales-Porphyromonadaceae, Lactobacillaceae, and Erysipelotrichaceae. This helps with the point made before, if the taxonomy groups is very important, it's better to try with different databases and double check with other tools. 
+
+Lastly, I'd like to try out the random forest algorithm in calssify.rf because it's really cool...
+```{r eval=FALSE}
+mothur > classify.rf(shared=stability.an.0.03.subsample.shared, design=mouse.time.design)
+```
+
+By looking at stability.an.0.03.subsample.RF.0.03.summary file and compare the results from Greengenes and RDP, the top hits with highest MDA are similary and comes from falimy Porphyromonadaceae, Lachnospiraceae, etc. 
+
+The previous analysis with metastats and get.community commands are also generally in agreement with random forest methods, with OTU0004 (assigned to Porphyromonadaceae) as most responsible for the shift between early days and late days.
+
+
+##### Conclusion
+Using different classification databases generate similar results, e.g., OTU clustering. However, the naming in different databases do show divergence and need to pay attention to. 
+
+It's shown from the analysis that there is shift in gut microbiome in mice within 150 days after weaning. Also interesting is, as pointed out during workshop, D0 is more similar to later days rather than early days. This may come from mother's influence. As the child grow, its microbiome seems to deviate from the initial "setup" form mother but eventually go back. It will be interesting to investigate further to see if indeed mothers' microbiome can influence and to some extent decide baby's microbiome. This requires to include data from both mother and child. 
+
+
